@@ -276,6 +276,9 @@ public sealed class IpcParentConnection : IAsyncDisposable
     }
 
 #if NET462
+    /// <summary>
+    /// Releases all resources used by the connection and terminates the child process if running.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
@@ -295,6 +298,9 @@ public sealed class IpcParentConnection : IAsyncDisposable
         _childProcess.Dispose();
     }
 #else
+    /// <summary>
+    /// Releases all resources used by the connection and terminates the child process if running.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;

@@ -268,6 +268,9 @@ public sealed class IpcChildConnection : IAsyncDisposable
     }
 
 #if NET462
+    /// <summary>
+    /// Releases all resources used by the connection.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
@@ -285,6 +288,9 @@ public sealed class IpcChildConnection : IAsyncDisposable
         _pipeServer.Dispose();
     }
 #else
+    /// <summary>
+    /// Releases all resources used by the connection.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;

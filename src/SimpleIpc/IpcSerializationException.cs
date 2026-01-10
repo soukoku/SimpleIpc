@@ -14,6 +14,12 @@ public class IpcSerializationException : Exception
     /// </summary>
     public string? RawJson { get; }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IpcSerializationException"/> class.
+    /// </summary>
+    /// <param name="message">The error message.</param>
+    /// <param name="rawJson">The raw JSON that failed to deserialize.</param>
+    /// <param name="innerException">The inner exception.</param>
     public IpcSerializationException(string message, string? rawJson = null, Exception? innerException = null)
         : base(message, innerException)
     {
