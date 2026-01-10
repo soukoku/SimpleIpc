@@ -1,6 +1,7 @@
 # SimpleIpc
 
-A lightweight library for inter-process communication (IPC) between a parent and child process using named pipes.
+A lightweight library for inter-process communication (IPC) between a parent and child process using named pipes
+for .NET 462+ and dotnet 8.0+ applications.
 
 ## Installation
 
