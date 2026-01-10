@@ -1,4 +1,3 @@
-```markdown
 # SimpleIpc
 
 A lightweight library for inter-process communication (IPC) between a parent and child process using named pipes.
@@ -63,4 +62,3 @@ var connection = await IpcParentConnection.StartChildAsync(
 ## License
 
 MIT
-```
