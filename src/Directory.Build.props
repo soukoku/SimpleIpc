@@ -1,0 +1,35 @@
+<Project>
+	<PropertyGroup>
+		<!--change these in each release-->
+		<VersionPrefix>1.0.0.0</VersionPrefix>
+		<VersionSuffix></VersionSuffix>
+
+		<!--keep it the same until major # changes-->
+		<AssemblyVersion>1.0.0.0</AssemblyVersion>
+
+		<!--even more unlikely to change-->
+		<FileVersion>$(VersionPrefix)</FileVersion>
+		<PackageProjectUrl>https://github.com/soukoku/SimpleIpc</PackageProjectUrl>
+		<PackageTags>twain scan</PackageTags>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<RepositoryUrl>https://github.com/soukoku/SimpleIpc</RepositoryUrl>
+		<RepositoryType>GIT</RepositoryType>
+		<NeutralLanguage>en-US</NeutralLanguage>
+		<Copyright>Eugene Wang 2026</Copyright>
+		<Authors>Eugene Wang</Authors>
+
+		<LangVersion>12</LangVersion>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)'=='Release'">
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
+		<AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.pdb</AllowedOutputExtensionsInPackageBuildOutputFolder>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+	</ItemGroup>
+</Project>

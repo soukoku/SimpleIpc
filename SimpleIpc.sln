@@ -1,0 +1,52 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.1.11312.151
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Soukoku.SimpleIpc", "src\SimpleIpc\Soukoku.SimpleIpc.csproj", "{C9A5DAA4-B491-A4D8-8B73-53513C7C6ECE}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{6F510C68-45C5-468D-A1C4-DA3299299601}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IpcParent", "samples\IpcParent\IpcParent.csproj", "{94BF5874-4AFC-B040-CEB8-081ABE86BE3F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IpcChild", "samples\IpcChild\IpcChild.csproj", "{DD9AC936-C820-BE7D-5732-BEEC5F316B8C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "_common", "_common", "{8DE4F232-FEAE-4C5C-9110-BDF433297309}"
+	ProjectSection(SolutionItems) = preProject
+		.gitignore = .gitignore
+		Build.cmd = Build.cmd
+		src\Directory.Build.props = src\Directory.Build.props
+		LICENSE.txt = LICENSE.txt
+		Readme.md = Readme.md
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C9A5DAA4-B491-A4D8-8B73-53513C7C6ECE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C9A5DAA4-B491-A4D8-8B73-53513C7C6ECE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C9A5DAA4-B491-A4D8-8B73-53513C7C6ECE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C9A5DAA4-B491-A4D8-8B73-53513C7C6ECE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{94BF5874-4AFC-B040-CEB8-081ABE86BE3F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{94BF5874-4AFC-B040-CEB8-081ABE86BE3F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{94BF5874-4AFC-B040-CEB8-081ABE86BE3F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{94BF5874-4AFC-B040-CEB8-081ABE86BE3F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DD9AC936-C820-BE7D-5732-BEEC5F316B8C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DD9AC936-C820-BE7D-5732-BEEC5F316B8C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DD9AC936-C820-BE7D-5732-BEEC5F316B8C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DD9AC936-C820-BE7D-5732-BEEC5F316B8C}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{94BF5874-4AFC-B040-CEB8-081ABE86BE3F} = {6F510C68-45C5-468D-A1C4-DA3299299601}
+		{DD9AC936-C820-BE7D-5732-BEEC5F316B8C} = {6F510C68-45C5-468D-A1C4-DA3299299601}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {0155EF1C-26CB-49DD-B614-AD0997AF29D8}
+	EndGlobalSection
+EndGlobal
