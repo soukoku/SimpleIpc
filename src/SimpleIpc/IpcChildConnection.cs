@@ -18,7 +18,7 @@ namespace SimpleIpc;
 #if NET462
 public sealed class IpcChildConnection : IDisposable
 #else
-public sealed class IpcChildConnection : IAsyncDisposable
+public sealed class IpcChildConnection : IAsyncDisposable, IDisposable
 #endif
 {
     /// <summary>
@@ -52,7 +52,7 @@ public sealed class IpcChildConnection : IAsyncDisposable
     /// <summary>
     /// Gets a value indicating whether the connection is still active.
     /// </summary>
-    public bool IsConnected => !_disposed && !_disconnectCts.IsCancellationRequested 
+    public bool IsConnected => !_disposed && !_disconnectCts.IsCancellationRequested
         && _pipeServer.IsConnected;
 
     private IpcChildConnection(NamedPipeServerStream pipeServer, int? parentPid, IIpcSerializer serializer)
@@ -267,7 +267,6 @@ public sealed class IpcChildConnection : IAsyncDisposable
         await SendMessageAsync(data, cancellationToken);
     }
 
-#if NET462
     /// <summary>
     /// Releases all resources used by the connection.
     /// </summary>
@@ -287,7 +286,7 @@ public sealed class IpcChildConnection : IAsyncDisposable
         _reader.Dispose();
         _pipeServer.Dispose();
     }
-#else
+#if !NET462
     /// <summary>
     /// Releases all resources used by the connection.
     /// </summary>

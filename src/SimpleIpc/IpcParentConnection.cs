@@ -18,7 +18,7 @@ namespace SimpleIpc;
 #if NET462
 public sealed class IpcParentConnection : IDisposable
 #else
-public sealed class IpcParentConnection : IAsyncDisposable
+public sealed class IpcParentConnection : IAsyncDisposable, IDisposable
 #endif
 {
     /// <summary>
@@ -52,7 +52,7 @@ public sealed class IpcParentConnection : IAsyncDisposable
     /// <summary>
     /// Gets a value indicating whether the connection is still active.
     /// </summary>
-    public bool IsConnected => !_disposed && !_disconnectCts.IsCancellationRequested 
+    public bool IsConnected => !_disposed && !_disconnectCts.IsCancellationRequested
         && _pipeClient.IsConnected && !_childProcess.HasExited;
 
     private IpcParentConnection(
@@ -112,7 +112,7 @@ public sealed class IpcParentConnection : IAsyncDisposable
         if (!File.Exists(childExecutablePath))
         {
             throw new FileNotFoundException(
-                $"Child executable not found: {childExecutablePath}", 
+                $"Child executable not found: {childExecutablePath}",
                 childExecutablePath);
         }
 
@@ -275,7 +275,6 @@ public sealed class IpcParentConnection : IAsyncDisposable
 #endif
     }
 
-#if NET462
     /// <summary>
     /// Releases all resources used by the connection and terminates the child process if running.
     /// </summary>
@@ -297,7 +296,7 @@ public sealed class IpcParentConnection : IAsyncDisposable
         }
         _childProcess.Dispose();
     }
-#else
+#if !NET462
     /// <summary>
     /// Releases all resources used by the connection and terminates the child process if running.
     /// </summary>
