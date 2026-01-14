@@ -51,6 +51,19 @@ public sealed class SystemTextJsonSerializer : IIpcSerializer
     }
 
     /// <inheritdoc />
+    public string Serialize(object value)
+    {
+        try
+        {
+            return JsonSerializer.Serialize(value, value.GetType(), _options);
+        }
+        catch (JsonException ex)
+        {
+            throw new IpcSerializationException($"Failed to serialize {value.GetType().Name}.", null, ex);
+        }
+    }
+
+    /// <inheritdoc />
     public T? Deserialize<T>(string? data)
     {
         if (data is null) return default;
@@ -62,6 +75,21 @@ public sealed class SystemTextJsonSerializer : IIpcSerializer
         catch (JsonException ex)
         {
             throw new IpcSerializationException($"Failed to deserialize message to {typeof(T).Name}.", data, ex);
+        }
+    }
+
+    /// <inheritdoc />
+    public object? Deserialize(string? data, Type type)
+    {
+        if (data is null) return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize(data, type, _options);
+        }
+        catch (JsonException ex)
+        {
+            throw new IpcSerializationException($"Failed to deserialize message to {type.Name}.", data, ex);
         }
     }
 }

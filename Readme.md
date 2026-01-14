@@ -1,18 +1,16 @@
 # SimpleIpc
 
-A lightweight, full-duplex IPC library for communication between parent and child processes using named pipes. Supports .NET Framework 4.6.2+ and .NET 8.0+.
+A lightweight IPC library for bidirectional communication between parent and child processes using named pipes. Supports .NET Framework 4.6.2+ and .NET 8.0+.
 
 ## Features
 
-- **Request-Response Pattern** - Send requests and await correlated responses in a single call
-- **Multiplexed Communication** - Multiple concurrent requests without blocking
-- **Bidirectional** - Both parent and child can initiate requests
-- **One-Way Messages** - Fire-and-forget notifications
-- **Type-Safe** - Strongly-typed message serialization using System.Text.Json
-- **Event-Based** - Handle incoming messages via `MessageReceived` event
-- **Error Propagation** - Remote exceptions are surfaced locally
-- **Connection Monitoring** - Automatic disconnection detection with `Disconnected` event
-- **Extensible** - Custom serializer support via `IIpcSerializer`
+- Request-response pattern with automatic correlation
+- Fire-and-forget messages
+- Typed handler registration
+- Bidirectional communication
+- Concurrent request support
+- Timeout handling
+- Custom serializer support
 
 ## Installation
 
@@ -20,320 +18,176 @@ A lightweight, full-duplex IPC library for communication between parent and chil
 dotnet add package Soukoku.SimpleIpc
 ```
 
-## Quick Start
+## Usage
 
-### Parent Process - Request-Response Pattern
+### Parent Process
 
 ```csharp
 using SimpleIpc;
 
-// Start child process and establish connection
-await using var connection = await IpcParentConnection.StartChildAsync("path/to/child.exe");
+await using var connection = await IpcParentConnection.StartChildAsync("child.exe");
 
-// Send request and await response
-var response = await connection.RequestAsync<MyRequest, MyResponse>(
-    new MyRequest { Data = "hello" });
+// Register handlers for messages from child
+connection.On<InfoRequest, InfoResponse>(req => 
+    new InfoResponse($"Parent PID: {Environment.ProcessId}"));
 
-Console.WriteLine($"Child responded: {response.Result}");
+connection.On<StatusNotification>(msg => 
+    Console.WriteLine($"Child says: {msg.Message}"));
+
+// Send request to child
+var result = await connection.RequestAsync<CalculateRequest, CalculateResponse>(
+    new CalculateRequest(10, 5, "+"));
+
+Console.WriteLine($"Result: {result.Value}");
+
+// Fire-and-forget
+await connection.SendAsync(new StatusNotification("Hello"));
 ```
 
-### Child Process - Handle Requests
+### Child Process
 
 ```csharp
 using SimpleIpc;
 
-// Connect to parent (automatically reads pipe name from command-line args)
-await using var connection = await IpcChildConnection.CreateAndWaitForConnectionAsync(args);
+await using var connection = await IpcChildConnection.ConnectAsync(args);
 
-// Handle incoming requests
-connection.MessageReceived += async (sender, e) =>
+// Register request handler
+connection.On<CalculateRequest, CalculateResponse>(req =>
 {
-    if (e.IsRequest)
+    int result = req.Operation switch
     {
-        var request = e.GetPayload<MyRequest>();
-        await connection.RespondAsync(e, new MyResponse { Result = "world" });
-    }
-};
+        "+" => req.A + req.B,
+        "-" => req.A - req.B,
+        _ => throw new NotSupportedException()
+    };
+    return new CalculateResponse(result);
+});
 
-// Keep running until disconnected
+// Handle one-way messages
+connection.On<StatusNotification>(msg => 
+    Console.WriteLine($"Parent says: {msg.Message}"));
+
+// Child can also request from parent
+var info = await connection.RequestAsync<InfoRequest, InfoResponse>(
+    new InfoRequest("version"));
+
+// Wait until disconnected
 await Task.Delay(-1, connection.DisconnectedToken);
 ```
 
-## Communication Patterns
+## Handler Registration
 
-### 1. Request-Response (Recommended)
+### Synchronous handlers
 
-Send a request and await its response in a single call. Responses are automatically correlated to their requests, allowing multiple concurrent requests.
-
-**Parent to Child:**
 ```csharp
-// Parent sends request
-var result = await connection.RequestAsync<CalculateRequest, CalculateResponse>(
-    new CalculateRequest { A = 10, B = 5, Operation = "+" });
-
-Console.WriteLine($"Result: {result.Value}");
+connection.On<TRequest, TResponse>(request => new TResponse(...));
+connection.On<TMessage>(message => Console.WriteLine(message));
 ```
 
-**Child handles and responds:**
+### Async handlers
+
 ```csharp
-connection.MessageReceived += async (sender, e) =>
-{
-    if (e.IsRequest)
-    {
-        var request = e.GetPayload<CalculateRequest>();
-        var result = request.A + request.B;
-        await connection.RespondAsync(e, new CalculateResponse { Value = result });
-    }
-};
+connection.On<TRequest, TResponse>(async (request, ct) => {
+    await Task.Delay(100, ct);
+    return new TResponse(...);
+});
+
+connection.On<TMessage>(async (message, ct) => {
+    await ProcessAsync(message, ct);
+});
 ```
 
-### 2. Multiple Concurrent Requests
-
-Send multiple requests simultaneously. Each request is independently tracked and responses are correlated correctly.
+## Request Timeout
 
 ```csharp
-// Fire off multiple requests at once
-var task1 = connection.RequestAsync<string, int>("GetNumber1");
-var task2 = connection.RequestAsync<string, int>("GetNumber2");
-var task3 = connection.RequestAsync<string, int>("GetNumber3");
-
-// Wait for all responses
-await Task.WhenAll(task1, task2, task3);
-
-Console.WriteLine($"Results: {task1.Result}, {task2.Result}, {task3.Result}");
-```
-
-### 3. One-Way Messages
-
-Send fire-and-forget messages that don't expect a response.
-
-**Sender:**
-```csharp
-// Send notification without waiting for response
-await connection.SendAsync(new StatusUpdate { Message = "Processing started" });
-```
-
-**Receiver:**
-```csharp
-connection.MessageReceived += (sender, e) =>
-{
-    if (!e.IsRequest) // One-way message
-    {
-        var status = e.GetPayload<StatusUpdate>();
-        Console.WriteLine($"Status: {status.Message}");
-    }
-};
-```
-
-### 4. Bidirectional Communication
-
-Both parent and child can initiate requests to each other simultaneously.
-
-**Child requests from Parent:**
-```csharp
-// In child process
-connection.MessageReceived += async (sender, e) =>
-{
-    if (e.IsRequest)
-    {
-        var config = e.GetPayload<ConfigRequest>();
-        await connection.RespondAsync(e, new ConfigResponse { Value = "setting" });
-    }
-};
-
-// Child can also send requests TO parent
-var parentInfo = await connection.RequestAsync<ParentInfoRequest, ParentInfoResponse>(
-    new ParentInfoRequest { Query = "version" });
-```
-
-**Parent handles child requests:**
-```csharp
-// In parent process
-connection.MessageReceived += async (sender, e) =>
-{
-    if (e.IsRequest)
-    {
-        var request = e.GetPayload<ParentInfoRequest>();
-        await connection.RespondAsync(e, new ParentInfoResponse { Info = "1.0.0" });
-    }
-};
+var result = await connection.RequestAsync<TReq, TRes>(
+    request,
+    timeout: TimeSpan.FromSeconds(5));
 ```
 
 ## Error Handling
 
-Exceptions thrown in the remote process are propagated as `IpcRemoteException`.
+Exceptions thrown in handlers are propagated to the caller as `IpcRemoteException`:
 
-**Receiver (handling request):**
-```csharp
-connection.MessageReceived += async (sender, e) =>
-{
-    if (e.IsRequest)
-    {
-        try
-        {
-            var request = e.GetPayload<DivideRequest>();
-            if (request.B == 0)
-                throw new DivideByZeroException();
-            
-            await connection.RespondAsync(e, new DivideResponse { Result = request.A / request.B });
-        }
-        catch (Exception ex)
-        {
-            // Send error response
-            await connection.RespondWithErrorAsync(e, ex.Message);
-        }
-    }
-};
-```
-
-**Sender (making request):**
 ```csharp
 try
 {
-    var result = await connection.RequestAsync<DivideRequest, DivideResponse>(
-        new DivideRequest { A = 10, B = 0 });
+    await connection.RequestAsync<TReq, TRes>(request);
 }
 catch (IpcRemoteException ex)
 {
-    Console.WriteLine($"Remote error: {ex.Message}"); // "Attempted to divide by zero."
+    Console.WriteLine($"Remote error: {ex.Message}");
+}
+catch (TimeoutException ex)
+{
+    Console.WriteLine("Request timed out");
 }
 catch (IpcDisconnectedException ex)
 {
-    Console.WriteLine($"Connection lost: {ex.Message}");
+    Console.WriteLine("Connection lost");
 }
 ```
 
-## Connection Management
-
-### Disconnection Detection
-
-Both connections provide events and tokens for monitoring disconnection.
+## Disconnection Handling
 
 ```csharp
-// Event-based notification
-connection.Disconnected += (sender, e) =>
-{
-    Console.WriteLine("Connection lost!");
-};
+connection.Disconnected += (sender, e) => Console.WriteLine("Disconnected");
 
-// Cancellation token for async operations
-try
-{
-    await SomeLongRunningOperationAsync(connection.DisconnectedToken);
-}
-catch (OperationCanceledException) when (connection.DisconnectedToken.IsCancellationRequested)
-{
-    Console.WriteLine("Operation cancelled due to disconnection");
-}
+// Use token for async operations
+await Task.Delay(-1, connection.DisconnectedToken);
 
-// Check connection status
-if (connection.IsConnected)
-{
-    await connection.SendAsync(message);
-}
-```
-
-### Parent-Specific Features
-
-```csharp
-await using var connection = await IpcParentConnection.StartChildAsync(
-    "child.exe",
-    connectionTimeout: TimeSpan.FromSeconds(10));
-
-// Get child process ID
-Console.WriteLine($"Child PID: {connection.ChildProcessId}");
-
-// Wait for child to exit
-await connection.WaitForExitAsync();
-
-// Dispose will terminate the child process if still running
-```
-
-### Child-Specific Features
-
-```csharp
-await using var connection = await IpcChildConnection.CreateAndWaitForConnectionAsync(
-    args,
-    connectionTimeout: TimeSpan.FromSeconds(30));
-
-// Get parent process ID
-Console.WriteLine($"Parent PID: {connection.ParentProcessId}");
-
-// Child automatically monitors parent and disconnects if parent exits
+// Check status
+if (connection.IsConnected) { ... }
 ```
 
 ## Custom Serialization
 
-Implement `IIpcSerializer` to use a different serialization library (e.g., MessagePack, Protobuf).
+Implement `IIpcSerializer` for custom serialization:
 
 ```csharp
-public class MyCustomSerializer : IIpcSerializer
+public class MessagePackSerializer : IIpcSerializer
 {
-    public string Serialize<T>(T value)
-    {
-        // Your serialization logic
-        return JsonConvert.SerializeObject(value);
-    }
-
-    public T? Deserialize<T>(string? data)
-    {
-        if (data == null) return default;
-        return JsonConvert.DeserializeObject<T>(data);
-    }
+    public string Serialize<T>(T value) { ... }
+    public string Serialize(object value) { ... }
+    public T? Deserialize<T>(string? data) { ... }
+    public object? Deserialize(string? data, Type type) { ... }
 }
 
 // Use custom serializer
-var connection = await IpcParentConnection.StartChildAsync(
-    "child.exe",
-    new MyCustomSerializer());
+await IpcParentConnection.StartChildAsync("child.exe", new MessagePackSerializer());
+await IpcChildConnection.ConnectAsync(args, new MessagePackSerializer());
 ```
 
 ## API Reference
 
 ### IpcParentConnection
 
-| Method | Description |
+| Member | Description |
 |--------|-------------|
-| `StartChildAsync(string path, IIpcSerializer? serializer, TimeSpan? timeout, CancellationToken ct)` | Starts child process and establishes connection |
-| `RequestAsync<TRequest, TResponse>(TRequest request, CancellationToken ct)` | Sends request and awaits correlated response |
-| `SendAsync<T>(T value, CancellationToken ct)` | Sends one-way message |
-| `RespondAsync<T>(IpcMessageReceivedEventArgs e, T response, CancellationToken ct)` | Responds to received request |
-| `RespondWithErrorAsync(IpcMessageReceivedEventArgs e, string error, CancellationToken ct)` | Sends error response |
-| `WaitForExitAsync(CancellationToken ct)` | Waits for child process to exit |
+| `StartChildAsync(path, timeout?, ct)` | Start child and connect |
+| `On<TReq, TRes>(handler)` | Register request handler |
+| `On<TMsg>(handler)` | Register message handler |
+| `RequestAsync<TReq, TRes>(req, timeout?, ct)` | Send request and await response |
+| `SendAsync<T>(msg, ct)` | Send fire-and-forget message |
+| `WaitForExitAsync(ct)` | Wait for child to exit |
+| `ChildProcessId` | Child process ID |
+| `IsConnected` | Connection status |
+| `DisconnectedToken` | Cancellation token for disconnection |
+| `Disconnected` | Disconnection event |
 
 ### IpcChildConnection
 
-| Method | Description |
+| Member | Description |
 |--------|-------------|
-| `CreateAndWaitForConnectionAsync(string[] args, IIpcSerializer? serializer, TimeSpan? timeout, CancellationToken ct)` | Creates connection using command-line args |
-| `RequestAsync<TRequest, TResponse>(TRequest request, CancellationToken ct)` | Sends request and awaits correlated response |
-| `SendAsync<T>(T value, CancellationToken ct)` | Sends one-way message |
-| `RespondAsync<T>(IpcMessageReceivedEventArgs e, T response, CancellationToken ct)` | Responds to received request |
-| `RespondWithErrorAsync(IpcMessageReceivedEventArgs e, string error, CancellationToken ct)` | Sends error response |
-
-### Events
-
-| Event | Description |
-|-------|-------------|
-| `MessageReceived` | Raised when a message is received (check `e.IsRequest` to determine if response is expected) |
-| `Disconnected` | Raised when connection is lost or remote process exits |
-
-### Properties
-
-| Property | Description |
-|----------|-------------|
-| `IsConnected` | Gets whether connection is active |
-| `DisconnectedToken` | Cancellation token that fires when disconnected |
-| `ChildProcessId` / `ParentProcessId` | Process ID of remote process |
-
-## Examples
-
-See the `samples` directory for complete working examples demonstrating:
-- Request-response pattern
-- Multiple concurrent requests
-- One-way messages
-- Bidirectional communication
-- Error handling
+| `ConnectAsync(args, timeout?, ct)` | Connect to parent |
+| `On<TReq, TRes>(handler)` | Register request handler |
+| `On<TMsg>(handler)` | Register message handler |
+| `RequestAsync<TReq, TRes>(req, timeout?, ct)` | Send request and await response |
+| `SendAsync<T>(msg, ct)` | Send fire-and-forget message |
+| `ParentProcessId` | Parent process ID (if available) |
+| `IsConnected` | Connection status |
+| `DisconnectedToken` | Cancellation token for disconnection |
+| `Disconnected` | Disconnection event |
 
 ## License
 
