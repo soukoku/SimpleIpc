@@ -1,105 +1,95 @@
 ﻿using SimpleIpc;
-using System.Diagnostics;
+using SharedMessages;
 
-namespace IpcParent;
-
-// Message types shared with child
-public record CalculateRequest(string Operation, int A, int B);
-public record CalculateResponse(int Result);
-public record StatusUpdate(string Message, DateTime Timestamp);
-public record ParentInfoRequest(string Query);
-public record ParentInfoResponse(string Info);
-
-internal class Program
+namespace SharedMessages
 {
-    static async Task Main(string[] args)
+    // Shared message types - must use same namespace in both projects for type matching
+    public record MathRequest(string Op, int A, int B);
+    public record MathResponse(int Result);
+    public record Ping(string Message);
+    public record Pong(string Reply);
+    public record Notification(string Text);
+}
+
+namespace IpcParent
+{
+    internal class Program
     {
-        var childPath = GetChildProcessPath();
-
-        Console.WriteLine("=== SimpleIpc Demo ===\n");
-
-        await using var connection = await IpcParentConnection.StartChildAsync(childPath);
-        Console.WriteLine($"[Parent] Connected to child (PID: {connection.ChildProcessId})\n");
-
-        // Register handler for requests from child
-        connection.On<ParentInfoRequest, ParentInfoResponse>(request =>
+        static async Task Main(string[] args)
         {
-            Console.WriteLine($"[Parent] Child asked: {request.Query}");
-            return new ParentInfoResponse($"Parent is '{Process.GetCurrentProcess().ProcessName}' (PID: {Environment.ProcessId})");
-        });
+            var childPath = GetChildProcessPath();
 
-        // Register handler for one-way messages from child
-        connection.On<StatusUpdate>(status =>
-        {
-            Console.WriteLine($"[Parent] Child says: {status.Message}");
-        });
+            Console.WriteLine("=== SimpleIpc Demo ===\n");
 
-        // Request-Response pattern
-        Console.WriteLine("--- Request-Response ---");
-        var result = await connection.RequestAsync<CalculateRequest, CalculateResponse>(
-            new CalculateRequest("+", 10, 5));
-        Console.WriteLine($"[Parent] 10 + 5 = {result.Result}");
+            await using var connection = await IpcParentConnection.StartChildAsync(childPath);
+            Console.WriteLine($"[Parent] Connected to child (PID: {connection.ChildProcessId})\n");
 
-        result = await connection.RequestAsync<CalculateRequest, CalculateResponse>(
-            new CalculateRequest("*", 7, 6));
-        Console.WriteLine($"[Parent] 7 * 6 = {result.Result}\n");
+            // Handle ping requests from child
+            connection.On<Ping, Pong>(p => new Pong($"Hi child! You said: {p.Message}"));
 
-        // Concurrent requests
-        Console.WriteLine("--- Concurrent Requests ---");
-        var tasks = new[]
-        {
-            connection.RequestAsync<CalculateRequest, CalculateResponse>(new CalculateRequest("+", 100, 50)),
-            connection.RequestAsync<CalculateRequest, CalculateResponse>(new CalculateRequest("-", 75, 25)),
-            connection.RequestAsync<CalculateRequest, CalculateResponse>(new CalculateRequest("*", 8, 9))
-        };
+            // Handle one-way notifications from child
+            connection.On<Notification>(n => Console.WriteLine($"  [Parent] Notification from child: {n.Text}"));
 
-        var results = await Task.WhenAll(tasks);
-        Console.WriteLine($"[Parent] Results: {results[0].Result}, {results[1].Result}, {results[2].Result}\n");
+            // 1. Request-Response pattern
+            Console.WriteLine("--- Request-Response ---");
+            var r1 = await connection.RequestAsync<MathRequest, MathResponse>(new MathRequest("+", 10, 5));
+            Console.WriteLine($"  10 + 5 = {r1.Result}");
 
-        // One-way messages
-        Console.WriteLine("--- One-Way Messages ---");
-        await connection.SendAsync(new StatusUpdate("Hello from parent", DateTime.UtcNow));
-        Console.WriteLine("[Parent] Sent notification\n");
+            var r2 = await connection.RequestAsync<MathRequest, MathResponse>(new MathRequest("*", 7, 6));
+            Console.WriteLine($"  7 * 6 = {r2.Result}\n");
 
-        await Task.Delay(100);
-
-        // Error handling
-        Console.WriteLine("--- Error Handling ---");
-        try
-        {
-            await connection.RequestAsync<CalculateRequest, CalculateResponse>(
-                new CalculateRequest("/", 10, 0));
-        }
-        catch (IpcRemoteException ex)
-        {
-            Console.WriteLine($"[Parent] Remote error: {ex.Message}");
-        }
-
-        Console.WriteLine("\n[Parent] Demo complete. Press any key to exit.");
-        Console.ReadKey();
-    }
-
-    static string GetChildProcessPath()
-    {
-        var currentDir = AppContext.BaseDirectory;
-
-        var possiblePaths = new[]
-        {
-            Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net9.0", "IpcChild.exe"),
-            Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net9.0", "IpcChild.exe"),
-            Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net8.0", "IpcChild.exe"),
-            Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net8.0", "IpcChild.exe"),
-        };
-
-        foreach (var path in possiblePaths)
-        {
-            var fullPath = Path.GetFullPath(path);
-            if (File.Exists(fullPath))
+            // 2. Concurrent requests
+            Console.WriteLine("--- Concurrent Requests ---");
+            var tasks = new[]
             {
-                return fullPath;
+                connection.RequestAsync<MathRequest, MathResponse>(new MathRequest("+", 100, 50)),
+                connection.RequestAsync<MathRequest, MathResponse>(new MathRequest("-", 75, 25)),
+                connection.RequestAsync<MathRequest, MathResponse>(new MathRequest("*", 8, 9))
+            };
+            var results = await Task.WhenAll(tasks);
+            Console.WriteLine($"  100+50={results[0].Result}, 75-25={results[1].Result}, 8*9={results[2].Result}\n");
+
+            // 3. One-way messages
+            Console.WriteLine("--- One-Way Messages ---");
+            await connection.SendAsync(new Notification("Hello from parent!"));
+            Console.WriteLine("  Sent notification to child\n");
+
+            await Task.Delay(100); // Let child process the notification
+
+            // 4. Error handling
+            Console.WriteLine("--- Error Handling ---");
+            try
+            {
+                await connection.RequestAsync<MathRequest, MathResponse>(new MathRequest("/", 10, 0));
             }
+            catch (IpcRemoteException ex)
+            {
+                Console.WriteLine($"  Remote error caught: {ex.Message}\n");
+            }
+
+            Console.WriteLine("[Parent] Demo complete. Press any key to exit.");
+            Console.ReadKey();
         }
 
-        throw new FileNotFoundException("Could not find IpcChild.exe. Build the IpcChild project first.");
+        static string GetChildProcessPath()
+        {
+            var currentDir = AppContext.BaseDirectory;
+            var possiblePaths = new[]
+            {
+                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net9.0", "IpcChild.exe"),
+                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net9.0", "IpcChild.exe"),
+                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net8.0", "IpcChild.exe"),
+                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net8.0", "IpcChild.exe"),
+            };
+
+            foreach (var path in possiblePaths)
+            {
+                var fullPath = Path.GetFullPath(path);
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            throw new FileNotFoundException("Could not find IpcChild.exe. Build the IpcChild project first.");
+        }
     }
 }
