@@ -13,7 +13,7 @@ namespace SharedMessages
 
 namespace IpcParent
 {
-    internal class Program
+    internal class ParentProgram
     {
         static async Task Main(string[] args)
         {
@@ -29,6 +29,9 @@ namespace IpcParent
 
             // Handle one-way notifications from child
             connection.On<Notification>(n => Console.WriteLine($"  [Parent] Notification from child: {n.Text}"));
+
+            // Start listening after all handlers are registered
+            connection.Start();
 
             // 1. Request-Response pattern
             Console.WriteLine("--- Request-Response ---");

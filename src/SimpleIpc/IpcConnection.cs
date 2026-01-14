@@ -2,13 +2,13 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Pipes;
 using System.Threading;
 using System.Threading.Tasks;
 #else
 using System.Collections.Concurrent;
-using System.IO.Pipes;
 #endif
+using System.Diagnostics;
+using System.IO.Pipes;
 
 namespace SimpleIpc;
 
@@ -382,8 +382,11 @@ public abstract class IpcConnection :
         if (string.IsNullOrEmpty(typeName)) return null;
 
         // Search in all loaded assemblies
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+        foreach (var assembly in assemblies)
         {
+            //if (assembly.FullName.Contains("DSBridge.Core")) Debugger.Break();
+
             var type = assembly.GetType(typeName);
             if (type != null) return type;
         }

@@ -13,7 +13,7 @@ namespace SharedMessages
 
 namespace IpcChild
 {
-    internal class Program
+    internal class ChildProgram
     {
         static async Task Main(string[] args)
         {
@@ -42,6 +42,9 @@ namespace IpcChild
 
             // Handle disconnection
             connection.Disconnected += (_, _) => Console.WriteLine("[Child] Disconnected.");
+
+            // Start listening after all handlers are registered
+            connection.Start();
 
             try
             {

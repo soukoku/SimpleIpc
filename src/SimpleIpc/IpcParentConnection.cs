@@ -24,6 +24,7 @@ public sealed class IpcParentConnection : IpcConnection
 
     private readonly Process _childProcess;
     private bool _disposed;
+    private bool _started;
 
     /// <summary>
     /// Gets the process ID of the child process.
@@ -41,7 +42,19 @@ public sealed class IpcParentConnection : IpcConnection
 
         _childProcess.EnableRaisingEvents = true;
         _childProcess.Exited += OnChildExited;
+    }
 
+    /// <summary>
+    /// Starts the message loop to begin processing messages from the child.
+    /// Call this after registering all message handlers.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown if already started.</exception>
+    public void Start()
+    {
+        ThrowIfDisposed();
+        if (_started)
+            throw new InvalidOperationException("Connection has already been started.");
+        _started = true;
         StartMessageLoop();
     }
 
