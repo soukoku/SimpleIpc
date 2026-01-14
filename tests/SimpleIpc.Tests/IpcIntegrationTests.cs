@@ -1,5 +1,4 @@
 using SimpleIpc;
-using System.Diagnostics;
 using System.IO.Pipes;
 
 namespace SimpleIpc.Tests;
@@ -8,24 +7,15 @@ public record TestRequest(string Data);
 public record TestResponse(string Result);
 public record TestNotification(string Message);
 
-public class IpcIntegrationTests : IDisposable
+public class IpcIntegrationTests
 {
-    private readonly string _pipeName = $"test_{Guid.NewGuid():N}";
-
-    public void Dispose()
-    {
-        GC.SuppressFinalize(this);
-    }
-
     [Fact]
     public async Task RequestResponse_SyncHandler_ReturnsResponse()
     {
         // Arrange
-        var serverTask = CreateServerConnectionAsync();
-        var clientTask = CreateClientConnectionAsync();
-
-        await using var server = await serverTask;
-        await using var client = await clientTask;
+        var (server, client) = await CreateConnectedPairAsync();
+        await using var _ = server;
+        await using var __ = client;
 
         server.On<TestRequest, TestResponse>(req => new TestResponse($"Echo: {req.Data}"));
 
@@ -42,11 +32,9 @@ public class IpcIntegrationTests : IDisposable
     public async Task RequestResponse_AsyncHandler_ReturnsResponse()
     {
         // Arrange
-        var serverTask = CreateServerConnectionAsync();
-        var clientTask = CreateClientConnectionAsync();
-
-        await using var server = await serverTask;
-        await using var client = await clientTask;
+        var (server, client) = await CreateConnectedPairAsync();
+        await using var _ = server;
+        await using var __ = client;
 
         server.On<TestRequest, TestResponse>(async (req, ct) =>
         {
@@ -67,11 +55,9 @@ public class IpcIntegrationTests : IDisposable
     public async Task RequestResponse_HandlerThrows_ThrowsRemoteException()
     {
         // Arrange
-        var serverTask = CreateServerConnectionAsync();
-        var clientTask = CreateClientConnectionAsync();
-
-        await using var server = await serverTask;
-        await using var client = await clientTask;
+        var (server, client) = await CreateConnectedPairAsync();
+        await using var _ = server;
+        await using var __ = client;
 
         server.On<TestRequest, TestResponse>(_ => throw new InvalidOperationException("Handler error"));
 
@@ -88,11 +74,9 @@ public class IpcIntegrationTests : IDisposable
     public async Task RequestResponse_NoHandler_ThrowsRemoteException()
     {
         // Arrange
-        var serverTask = CreateServerConnectionAsync();
-        var clientTask = CreateClientConnectionAsync();
-
-        await using var server = await serverTask;
-        await using var client = await clientTask;
+        var (server, client) = await CreateConnectedPairAsync();
+        await using var _ = server;
+        await using var __ = client;
 
         // No handler registered
 
@@ -109,11 +93,9 @@ public class IpcIntegrationTests : IDisposable
     public async Task RequestResponse_Timeout_ThrowsTimeoutException()
     {
         // Arrange
-        var serverTask = CreateServerConnectionAsync();
-        var clientTask = CreateClientConnectionAsync();
-
-        await using var server = await serverTask;
-        await using var client = await clientTask;
+        var (server, client) = await CreateConnectedPairAsync();
+        await using var _ = server;
+        await using var __ = client;
 
         server.On<TestRequest, TestResponse>(async (_, ct) =>
         {
@@ -132,11 +114,9 @@ public class IpcIntegrationTests : IDisposable
     public async Task SendAsync_WithHandler_ReceivesMessage()
     {
         // Arrange
-        var serverTask = CreateServerConnectionAsync();
-        var clientTask = CreateClientConnectionAsync();
-
-        await using var server = await serverTask;
-        await using var client = await clientTask;
+        var (server, client) = await CreateConnectedPairAsync();
+        await using var _ = server;
+        await using var __ = client;
 
         var receivedMessage = new TaskCompletionSource<string>();
         server.On<TestNotification>(msg => receivedMessage.SetResult(msg.Message));
@@ -153,11 +133,9 @@ public class IpcIntegrationTests : IDisposable
     public async Task ConcurrentRequests_AllSucceed()
     {
         // Arrange
-        var serverTask = CreateServerConnectionAsync();
-        var clientTask = CreateClientConnectionAsync();
-
-        await using var server = await serverTask;
-        await using var client = await clientTask;
+        var (server, client) = await CreateConnectedPairAsync();
+        await using var _ = server;
+        await using var __ = client;
 
         server.On<TestRequest, TestResponse>(req => new TestResponse($"Response: {req.Data}"));
 
@@ -178,11 +156,9 @@ public class IpcIntegrationTests : IDisposable
     public async Task Bidirectional_BothCanRequest()
     {
         // Arrange
-        var serverTask = CreateServerConnectionAsync();
-        var clientTask = CreateClientConnectionAsync();
-
-        await using var server = await serverTask;
-        await using var client = await clientTask;
+        var (server, client) = await CreateConnectedPairAsync();
+        await using var _ = server;
+        await using var __ = client;
 
         server.On<TestRequest, TestResponse>(req => new TestResponse($"Server: {req.Data}"));
         client.On<TestRequest, TestResponse>(req => new TestResponse($"Client: {req.Data}"));
@@ -205,11 +181,8 @@ public class IpcIntegrationTests : IDisposable
     public async Task Disconnect_CancelsToken()
     {
         // Arrange
-        var serverTask = CreateServerConnectionAsync();
-        var clientTask = CreateClientConnectionAsync();
-
-        var server = await serverTask;
-        await using var client = await clientTask;
+        var (server, client) = await CreateConnectedPairAsync();
+        await using var __ = client;
 
         var disconnectedTcs = new TaskCompletionSource();
         client.Disconnected += (_, _) => disconnectedTcs.SetResult();
@@ -222,46 +195,42 @@ public class IpcIntegrationTests : IDisposable
         Assert.True(client.DisconnectedToken.IsCancellationRequested);
     }
 
-    private async Task<TestConnection> CreateServerConnectionAsync()
+    private static async Task<(TestConnection server, TestConnection client)> CreateConnectedPairAsync()
     {
-        var pipe = new NamedPipeServerStream(
-            _pipeName,
+        var pipeName = $"test_{Guid.NewGuid():N}";
+
+        var serverPipe = new NamedPipeServerStream(
+            pipeName,
             PipeDirection.InOut,
             1,
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous);
 
-        var connectTask = pipe.WaitForConnectionAsync();
-        return new TestConnection(pipe, connectTask);
-    }
-
-    private async Task<TestConnection> CreateClientConnectionAsync()
-    {
-        var pipe = new NamedPipeClientStream(
+        var clientPipe = new NamedPipeClientStream(
             ".",
-            _pipeName,
+            pipeName,
             PipeDirection.InOut,
             PipeOptions.Asynchronous);
 
-        await pipe.ConnectAsync(5000);
-        return new TestConnection(pipe, Task.CompletedTask);
+        // Connect both ends
+        var serverConnectTask = serverPipe.WaitForConnectionAsync();
+        await clientPipe.ConnectAsync(5000);
+        await serverConnectTask;
+
+        // Create connections after pipes are connected
+        var server = new TestConnection(serverPipe);
+        var client = new TestConnection(clientPipe);
+
+        return (server, client);
     }
 
     private sealed class TestConnection : IpcConnection
     {
-        private readonly Task _connectTask;
         private bool _disposed;
 
-        public TestConnection(PipeStream pipe, Task connectTask)
+        public TestConnection(PipeStream pipe)
             : base(pipe, SystemTextJsonSerializer.Default)
         {
-            _connectTask = connectTask;
-            _ = InitializeAsync();
-        }
-
-        private async Task InitializeAsync()
-        {
-            await _connectTask;
             StartMessageLoop();
         }
 

@@ -269,6 +269,8 @@ public abstract class IpcConnection :
                 var rawMessage = await ReadRawMessageAsync(_disconnectCts.Token);
                 if (rawMessage == null)
                 {
+                    // Pipe closed
+                    RaiseDisconnected();
                     break;
                 }
 
@@ -492,7 +494,19 @@ public abstract class IpcConnection :
         if (_disposed) return;
         _disposed = true;
 
+        // Cancel first to stop message loop and pending operations
         _disconnectCts.Cancel();
+
+        // Wait for message loop to complete (with timeout to avoid deadlock)
+        try
+        {
+            _messageLoop?.Wait(TimeSpan.FromSeconds(1));
+        }
+        catch
+        {
+            // Ignore - loop may have been cancelled
+        }
+
         _disconnectCts.Dispose();
         _writeLock.Dispose();
         _writer.Dispose();
@@ -518,7 +532,22 @@ public abstract class IpcConnection :
         if (_disposed) return;
         _disposed = true;
 
+        // Cancel first to stop message loop and pending operations
         _disconnectCts.Cancel();
+
+        // Wait for message loop to complete
+        if (_messageLoop != null)
+        {
+            try
+            {
+                await _messageLoop.WaitAsync(TimeSpan.FromSeconds(1));
+            }
+            catch
+            {
+                // Ignore - loop may have been cancelled
+            }
+        }
+
         _disconnectCts.Dispose();
         _writeLock.Dispose();
         await _writer.DisposeAsync();
