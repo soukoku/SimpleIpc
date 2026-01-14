@@ -1,10 +1,14 @@
 ﻿using SimpleIpc;
+using System.Diagnostics;
 
 namespace IpcParent;
 
 // Sample message types (matching child's types)
-public record GreetingRequest(string Command, DateTime Timestamp);
-public record GreetingResponse(string Result, string ProcessedBy);
+public record CalculateRequest(string Operation, int A, int B);
+public record CalculateResponse(int Result);
+public record StatusUpdate(string Message, DateTime Timestamp);
+public record ParentInfoRequest(string Query);
+public record ParentInfoResponse(string Info);
 
 internal class Program
 {
@@ -12,51 +16,182 @@ internal class Program
     {
         var childPath = GetChildProcessPath();
 
-        // Demo: Start multiple child processes concurrently
-        var tasks = new[]
-        {
-            CommunicateWithChildAsync(childPath, "Child 1"),
-            CommunicateWithChildAsync(childPath, "Child 2"),
-            CommunicateWithChildAsync(childPath, "Child 3")
-        };
+        Console.WriteLine("=== SimpleIpc Communication Patterns Demo ===\n");
+        Console.WriteLine("This demo showcases:");
+        Console.WriteLine("  1. Request-Response pattern (with awaitable results)");
+        Console.WriteLine("  2. One-way messages (fire-and-forget)");
+        Console.WriteLine("  3. Bidirectional communication (child can request from parent)");
+        Console.WriteLine("  4. Multiple concurrent requests");
+        Console.WriteLine("  5. Error handling\n");
 
-        await Task.WhenAll(tasks);
-        Console.WriteLine("All child processes completed.");
+        await DemoAllPatternsAsync(childPath);
+        
+        Console.WriteLine("\n=== Demo completed ===");
     }
 
-    static async Task CommunicateWithChildAsync(string childPath, string childName)
+    static async Task DemoAllPatternsAsync(string childPath)
     {
         await using var connection = await IpcParentConnection.StartChildAsync(childPath);
+        var childPid = connection.ChildProcessId;
 
-        Console.WriteLine($"[{childName}] Connected to child process (PID: {connection.ChildProcessId})");
+        Console.WriteLine($"[Parent] Connected to child process (PID: {childPid})\n");
 
-        // Send typed request
-        var request = new GreetingRequest("hello", DateTime.UtcNow);
-        await connection.SendAsync(request);
-        Console.WriteLine($"[{childName}] Sent: {request}");
+        // Set up message handler for child-to-parent communication
+        connection.MessageReceived += async (sender, e) =>
+        {
+            try
+            {
+                if (e.IsRequest)
+                {
+                    // Handle requests from child
+                    var infoRequest = e.GetPayload<ParentInfoRequest>();
+                    if (infoRequest != null)
+                    {
+                        Console.WriteLine($"[Parent] Child requested: {infoRequest.Query}");
+                        await connection.RespondAsync(e, new ParentInfoResponse(
+                            $"Parent is '{Process.GetCurrentProcess().ProcessName}' (PID: {Environment.ProcessId})"));
+                    }
+                }
+                else
+                {
+                    // Handle one-way messages from child
+                    var statusUpdate = e.GetPayload<StatusUpdate>();
+                    if (statusUpdate != null)
+                    {
+                        Console.WriteLine($"[Parent] Child says: {statusUpdate.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Parent] Error handling message: {ex.Message}");
+            }
+        };
 
-        // Receive typed response
-        var response = await connection.ReadAsync<GreetingResponse>();
-        Console.WriteLine($"[{childName}] Received: {response}");
+        // Pattern 1: Request-Response (awaitable)
+        await DemoRequestResponseAsync(connection);
 
-        await connection.WaitForExitAsync();
-        Console.WriteLine($"[{childName}] Exited.");
+        // Pattern 2: Multiple concurrent requests
+        await DemoMultipleConcurrentRequestsAsync(connection);
+
+        // Pattern 3: One-way messages
+        await DemoOneWayMessagesAsync(connection);
+
+        // Pattern 4: Error handling
+        await DemoErrorHandlingAsync(connection);
+
+        Console.WriteLine("\n[Parent] Demo complete. Press Ctrl+C to exit (child will be terminated).");
+        await Task.Delay(-1);
+    }
+
+    static async Task DemoRequestResponseAsync(IpcParentConnection connection)
+    {
+        Console.WriteLine("=== Pattern 1: Request-Response ===");
+        
+        var response = await connection.RequestAsync<CalculateRequest, CalculateResponse>(
+            new CalculateRequest("+", 10, 5));
+        
+        Console.WriteLine($"[Parent] 10 + 5 = {response?.Result}");
+
+        response = await connection.RequestAsync<CalculateRequest, CalculateResponse>(
+            new CalculateRequest("*", 7, 6));
+        
+        Console.WriteLine($"[Parent] 7 * 6 = {response?.Result}\n");
+        
+        await Task.Delay(100); // Brief delay to see child's logs
+    }
+
+    static async Task DemoMultipleConcurrentRequestsAsync(IpcParentConnection connection)
+    {
+        Console.WriteLine("=== Pattern 2: Multiple Concurrent Requests ===");
+        
+        var task1 = connection.RequestAsync<CalculateRequest, CalculateResponse>(
+            new CalculateRequest("+", 100, 50));
+        
+        var task2 = connection.RequestAsync<CalculateRequest, CalculateResponse>(
+            new CalculateRequest("-", 75, 25));
+        
+        var task3 = connection.RequestAsync<CalculateRequest, CalculateResponse>(
+            new CalculateRequest("*", 8, 9));
+
+        Console.WriteLine("[Parent] Sent 3 concurrent requests...");
+        
+        await Task.WhenAll(task1, task2, task3);
+
+        Console.WriteLine($"[Parent] Result 1: 100 + 50 = {task1.Result?.Result}");
+        Console.WriteLine($"[Parent] Result 2: 75 - 25 = {task2.Result?.Result}");
+        Console.WriteLine($"[Parent] Result 3: 8 * 9 = {task3.Result?.Result}\n");
+    }
+
+    static async Task DemoOneWayMessagesAsync(IpcParentConnection connection)
+    {
+        Console.WriteLine("=== Pattern 3: One-Way Messages ===");
+        
+        // Send fire-and-forget messages
+        await connection.SendAsync(new StatusUpdate("Parent sending notification 1", DateTime.UtcNow));
+        Console.WriteLine("[Parent] Sent one-way message (no response expected)");
+        
+        await Task.Delay(100); // Brief delay to see child's response
+
+        await connection.SendAsync(new StatusUpdate("Parent sending notification 2", DateTime.UtcNow));
+        Console.WriteLine("[Parent] Sent another one-way message\n");
+        
+        await Task.Delay(100); // Brief delay to see child's response
+    }
+
+    static async Task DemoErrorHandlingAsync(IpcParentConnection connection)
+    {
+        Console.WriteLine("=== Pattern 4: Error Handling ===");
+        
+        try
+        {
+            // This will cause a divide by zero error in the child
+            var response = await connection.RequestAsync<CalculateRequest, CalculateResponse>(
+                new CalculateRequest("/", 10, 0));
+            
+            Console.WriteLine($"[Parent] 10 / 0 = {response?.Result}");
+        }
+        catch (IpcRemoteException ex)
+        {
+            Console.WriteLine($"[Parent] Child returned error: {ex.Message}");
+        }
+
+        try
+        {
+            // This will cause an unknown operation error
+            var response = await connection.RequestAsync<CalculateRequest, CalculateResponse>(
+                new CalculateRequest("%", 10, 3));
+            
+            Console.WriteLine($"[Parent] 10 % 3 = {response?.Result}");
+        }
+        catch (IpcRemoteException ex)
+        {
+            Console.WriteLine($"[Parent] Child returned error: {ex.Message}");
+        }
     }
 
     static string GetChildProcessPath()
     {
         var currentDir = AppContext.BaseDirectory;
-        var childPath = Path.GetFullPath(
-            Path.Combine(currentDir, "..", "..", "..", "..",
-                "IpcChild", "bin", "Debug", "net9.0", "IpcChild.exe"));
-
-        if (!File.Exists(childPath))
+        
+        // Try various common paths
+        var possiblePaths = new[]
         {
-            childPath = Path.GetFullPath(
-                Path.Combine(currentDir, "..", "..", "..", "..",
-                    "IpcChild", "bin", "Release", "net9.0", "IpcChild.exe"));
+            Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net9.0", "IpcChild.exe"),
+            Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net9.0", "IpcChild.exe"),
+            Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net8.0", "IpcChild.exe"),
+            Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net8.0", "IpcChild.exe"),
+        };
+
+        foreach (var path in possiblePaths)
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (File.Exists(fullPath))
+            {
+                return fullPath;
+            }
         }
 
-        return childPath;
+        throw new FileNotFoundException("Could not find IpcChild.exe. Make sure to build the IpcChild project first.");
     }
 }

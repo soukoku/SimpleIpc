@@ -23,7 +23,6 @@ public sealed class SystemTextJsonSerializer : IIpcSerializer
     public SystemTextJsonSerializer()
         : this(new JsonSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             PropertyNameCaseInsensitive = true
         })
     {
