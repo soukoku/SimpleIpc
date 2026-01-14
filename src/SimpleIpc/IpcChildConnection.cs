@@ -15,23 +15,14 @@ namespace SimpleIpc;
 /// <summary>
 /// Manages the child-side of an IPC connection using named pipes.
 /// </summary>
-#if NET462
-public sealed class IpcChildConnection : IDisposable
-#else
-public sealed class IpcChildConnection : IAsyncDisposable, IDisposable
-#endif
+public sealed class IpcChildConnection : IpcConnection
 {
     /// <summary>
     /// The command-line argument name used to pass the pipe name.
     /// </summary>
     public const string PipeNameArg = "--ipc-pipe";
 
-    private readonly NamedPipeServerStream _pipeServer;
-    private readonly StreamReader _reader;
-    private readonly StreamWriter _writer;
-    private readonly IIpcSerializer _serializer;
     private readonly Process? _parentProcess;
-    private readonly CancellationTokenSource _disconnectCts = new();
     private bool _disposed;
 
     /// <summary>
@@ -39,31 +30,11 @@ public sealed class IpcChildConnection : IAsyncDisposable, IDisposable
     /// </summary>
     public int? ParentProcessId { get; }
 
-    /// <summary>
-    /// Occurs when the parent process exits or the connection is lost.
-    /// </summary>
-    public event EventHandler? Disconnected;
-
-    /// <summary>
-    /// Gets a cancellation token that is cancelled when disconnected from the parent.
-    /// </summary>
-    public CancellationToken DisconnectedToken => _disconnectCts.Token;
-
-    /// <summary>
-    /// Gets a value indicating whether the connection is still active.
-    /// </summary>
-    public bool IsConnected => !_disposed && !_disconnectCts.IsCancellationRequested
-        && _pipeServer.IsConnected;
-
     private IpcChildConnection(NamedPipeServerStream pipeServer, int? parentPid, IIpcSerializer serializer)
+        : base(pipeServer, serializer)
     {
         ParentProcessId = parentPid;
-        _pipeServer = pipeServer;
-        _reader = new StreamReader(_pipeServer);
-        _writer = new StreamWriter(_pipeServer) { AutoFlush = true };
-        _serializer = serializer;
 
-        // Start monitoring parent process if PID was provided
         if (parentPid.HasValue)
         {
             try
@@ -74,10 +45,11 @@ public sealed class IpcChildConnection : IAsyncDisposable, IDisposable
             }
             catch (ArgumentException)
             {
-                // Parent process already exited
                 RaiseDisconnected();
             }
         }
+
+        StartMessageLoop();
     }
 
     private void OnParentExited(object? sender, EventArgs e)
@@ -85,30 +57,30 @@ public sealed class IpcChildConnection : IAsyncDisposable, IDisposable
         RaiseDisconnected();
     }
 
-    private void RaiseDisconnected()
-    {
-        if (!_disconnectCts.IsCancellationRequested)
-        {
-            _disconnectCts.Cancel();
-            Disconnected?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
     /// <summary>
     /// Creates a new IPC connection using the pipe name from command-line arguments and the default serializer.
     /// </summary>
-    public static Task<IpcChildConnection> CreateAndWaitForConnectionAsync(
+    /// <param name="args">Command-line arguments containing the pipe name.</param>
+    /// <param name="connectionTimeout">Timeout for parent connection. Defaults to 30 seconds.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The established connection.</returns>
+    public static Task<IpcChildConnection> ConnectAsync(
         string[] args,
         TimeSpan? connectionTimeout = null,
         CancellationToken cancellationToken = default)
     {
-        return CreateAndWaitForConnectionAsync(args, SystemTextJsonSerializer.Default, connectionTimeout, cancellationToken);
+        return ConnectAsync(args, SystemTextJsonSerializer.Default, connectionTimeout, cancellationToken);
     }
 
     /// <summary>
     /// Creates a new IPC connection using the pipe name from command-line arguments and a custom serializer.
     /// </summary>
-    public static async Task<IpcChildConnection> CreateAndWaitForConnectionAsync(
+    /// <param name="args">Command-line arguments containing the pipe name.</param>
+    /// <param name="serializer">The serializer to use for messages.</param>
+    /// <param name="connectionTimeout">Timeout for parent connection. Defaults to 30 seconds.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The established connection.</returns>
+    public static async Task<IpcChildConnection> ConnectAsync(
         string[] args,
         IIpcSerializer serializer,
         TimeSpan? connectionTimeout = null,
@@ -164,6 +136,8 @@ public sealed class IpcChildConnection : IAsyncDisposable, IDisposable
     /// <summary>
     /// Extracts the pipe name from command-line arguments.
     /// </summary>
+    /// <param name="args">Command-line arguments.</param>
+    /// <returns>The pipe name, or null if not found.</returns>
     public static string? GetPipeNameFromArgs(string[] args)
     {
         for (int i = 0; i < args.Length - 1; i++)
@@ -179,6 +153,8 @@ public sealed class IpcChildConnection : IAsyncDisposable, IDisposable
     /// <summary>
     /// Extracts the parent process ID from command-line arguments.
     /// </summary>
+    /// <param name="args">Command-line arguments.</param>
+    /// <returns>The parent process ID, or null if not found.</returns>
     public static int? GetParentPidFromArgs(string[] args)
     {
         for (int i = 0; i < args.Length - 1; i++)
@@ -191,86 +167,8 @@ public sealed class IpcChildConnection : IAsyncDisposable, IDisposable
         return null;
     }
 
-    private async Task<string?> ReadMessageAsync(CancellationToken cancellationToken)
-    {
-        ThrowIfDisposed();
-        try
-        {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disconnectCts.Token);
-#if NET462
-            return await Task.Run(() => _reader.ReadLine(), linkedCts.Token);
-#else
-            return await _reader.ReadLineAsync(linkedCts.Token);
-#endif
-        }
-        catch (IOException)
-        {
-            RaiseDisconnected();
-            return null;
-        }
-        catch (OperationCanceledException) when (_disconnectCts.IsCancellationRequested)
-        {
-            return null;
-        }
-    }
-
-    private async Task SendMessageAsync(string message, CancellationToken cancellationToken)
-    {
-        ThrowIfDisposed();
-        try
-        {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disconnectCts.Token);
-#if NET462
-            await Task.Run(() => _writer.WriteLine(message), linkedCts.Token);
-#else
-            await _writer.WriteLineAsync(message.AsMemory(), linkedCts.Token);
-#endif
-        }
-        catch (IOException ex)
-        {
-            RaiseDisconnected();
-            throw new IpcDisconnectedException("Connection to parent process was lost.", ex);
-        }
-        catch (OperationCanceledException) when (_disconnectCts.IsCancellationRequested)
-        {
-            throw new IpcDisconnectedException("Connection to parent process was lost.");
-        }
-    }
-
-    private void ThrowIfDisposed()
-    {
-#if NET462
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(GetType().FullName);
-        }
-#else
-        ObjectDisposedException.ThrowIf(_disposed, this);
-#endif
-    }
-
-    /// <summary>
-    /// Reads and deserializes a message from the parent process.
-    /// </summary>
-    public async Task<T?> ReadAsync<T>(CancellationToken cancellationToken = default)
-    {
-        var data = await ReadMessageAsync(cancellationToken);
-        return _serializer.Deserialize<T>(data);
-    }
-
-    /// <summary>
-    /// Serializes and sends an object as a message to the parent process.
-    /// </summary>
-    public async Task SendAsync<T>(T value, CancellationToken cancellationToken = default)
-    {
-        var data = _serializer.Serialize(value);
-        await SendMessageAsync(data, cancellationToken);
-    }
-
-    /// <summary>
-    /// Releases all resources used by the connection.
-    /// </summary>
-    public void Dispose()
+    /// <inheritdoc />
+    public override void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
@@ -281,16 +179,12 @@ public sealed class IpcChildConnection : IAsyncDisposable, IDisposable
             _parentProcess.Dispose();
         }
 
-        _disconnectCts.Dispose();
-        _writer.Dispose();
-        _reader.Dispose();
-        _pipeServer.Dispose();
+        base.DisposeCore();
     }
+
 #if !NET462
-    /// <summary>
-    /// Releases all resources used by the connection.
-    /// </summary>
-    public async ValueTask DisposeAsync()
+    /// <inheritdoc />
+    public override async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
@@ -301,10 +195,7 @@ public sealed class IpcChildConnection : IAsyncDisposable, IDisposable
             _parentProcess.Dispose();
         }
 
-        _disconnectCts.Dispose();
-        await _writer.DisposeAsync();
-        _reader.Dispose();
-        await _pipeServer.DisposeAsync();
+        await base.DisposeCoreAsync();
     }
 #endif
 }

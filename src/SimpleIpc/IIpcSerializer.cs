@@ -20,6 +20,14 @@ public interface IIpcSerializer
     string Serialize<T>(T value);
 
     /// <summary>
+    /// Serializes an object to a string.
+    /// </summary>
+    /// <param name="value">The object to serialize.</param>
+    /// <returns>The serialized string representation.</returns>
+    /// <exception cref="IpcSerializationException">Thrown when serialization fails.</exception>
+    string Serialize(object value);
+
+    /// <summary>
     /// Deserializes a string to an object of the specified type.
     /// </summary>
     /// <typeparam name="T">The type to deserialize to.</typeparam>
@@ -27,4 +35,13 @@ public interface IIpcSerializer
     /// <returns>The deserialized object, or default if data is null.</returns>
     /// <exception cref="IpcSerializationException">Thrown when deserialization fails.</exception>
     T? Deserialize<T>(string? data);
+
+    /// <summary>
+    /// Deserializes a string to an object of the specified type.
+    /// </summary>
+    /// <param name="data">The string data to deserialize.</param>
+    /// <param name="type">The type to deserialize to.</param>
+    /// <returns>The deserialized object, or null if data is null.</returns>
+    /// <exception cref="IpcSerializationException">Thrown when deserialization fails.</exception>
+    object? Deserialize(string? data, Type type);
 }

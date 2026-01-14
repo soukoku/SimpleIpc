@@ -1,11 +1,22 @@
 # SimpleIpc
 
-A lightweight library for inter-process communication (IPC) between a parent and child process using named pipes
-for .NET 462+ and dotnet 8.0+ applications.
+A lightweight IPC library for bidirectional communication between parent and child processes using named pipes. Supports .NET Framework 4.6.2+ and .NET 8.0+.
+
+## Features
+
+- Request-response pattern with automatic correlation
+- Fire-and-forget messages
+- Typed handler registration
+- Bidirectional communication
+- Concurrent request support
+- Timeout handling
+- Custom serializer support
 
 ## Installation
 
-Reference the `Soukoku.SimpleIpc` package.
+```bash
+dotnet add package Soukoku.SimpleIpc
+```
 
 ## Usage
 
@@ -14,17 +25,23 @@ Reference the `Soukoku.SimpleIpc` package.
 ```csharp
 using SimpleIpc;
 
-// Start child and connect
-await using var connection = await IpcParentConnection.StartChildAsync("path/to/child.exe");
+await using var connection = await IpcParentConnection.StartChildAsync("child.exe");
 
-// Send a message
-await connection.SendAsync(new MyRequest { Data = "hello" });
+// Register handlers for messages from child
+connection.On<InfoRequest, InfoResponse>(req => 
+    new InfoResponse($"Parent PID: {Environment.ProcessId}"));
 
-// Receive a response
-var response = await connection.ReadAsync<MyResponse>();
+connection.On<StatusNotification>(msg => 
+    Console.WriteLine($"Child says: {msg.Message}"));
 
-// Wait for child to exit
-await connection.WaitForExitAsync();
+// Send request to child
+var result = await connection.RequestAsync<CalculateRequest, CalculateResponse>(
+    new CalculateRequest(10, 5, "+"));
+
+Console.WriteLine($"Result: {result.Value}");
+
+// Fire-and-forget
+await connection.SendAsync(new StatusNotification("Hello"));
 ```
 
 ### Child Process
@@ -32,33 +49,145 @@ await connection.WaitForExitAsync();
 ```csharp
 using SimpleIpc;
 
-// Connect to parent (reads pipe name from command-line args)
-await using var connection = await IpcChildConnection.CreateAndWaitForConnectionAsync(args);
+await using var connection = await IpcChildConnection.ConnectAsync(args);
 
-// Receive a message
-var request = await connection.ReadAsync<MyRequest>();
+// Register request handler
+connection.On<CalculateRequest, CalculateResponse>(req =>
+{
+    int result = req.Operation switch
+    {
+        "+" => req.A + req.B,
+        "-" => req.A - req.B,
+        _ => throw new NotSupportedException()
+    };
+    return new CalculateResponse(result);
+});
 
-// Send a response
-await connection.SendAsync(new MyResponse { Result = "world" });
+// Handle one-way messages
+connection.On<StatusNotification>(msg => 
+    Console.WriteLine($"Parent says: {msg.Message}"));
+
+// Child can also request from parent
+var info = await connection.RequestAsync<InfoRequest, InfoResponse>(
+    new InfoRequest("version"));
+
+// Wait until disconnected
+await Task.Delay(-1, connection.DisconnectedToken);
 ```
 
-## Features
+## Handler Registration
 
-- Typed message serialization using System.Text.Json
-- Custom serializer support via `IIpcSerializer`
-- Automatic disconnection detection with `Disconnected` event and `DisconnectedToken`
-- Connection timeout configuration
-- Parent process monitoring from child
-
-## Custom Serializer
-
-Implement `IIpcSerializer` to use a different serialization library:
+### Synchronous handlers
 
 ```csharp
-var connection = await IpcParentConnection.StartChildAsync(
-    "path/to/child.exe", 
-    myCustomSerializer);
+connection.On<TRequest, TResponse>(request => new TResponse(...));
+connection.On<TMessage>(message => Console.WriteLine(message));
 ```
+
+### Async handlers
+
+```csharp
+connection.On<TRequest, TResponse>(async (request, ct) => {
+    await Task.Delay(100, ct);
+    return new TResponse(...);
+});
+
+connection.On<TMessage>(async (message, ct) => {
+    await ProcessAsync(message, ct);
+});
+```
+
+## Request Timeout
+
+```csharp
+var result = await connection.RequestAsync<TReq, TRes>(
+    request,
+    timeout: TimeSpan.FromSeconds(5));
+```
+
+## Error Handling
+
+Exceptions thrown in handlers are propagated to the caller as `IpcRemoteException`:
+
+```csharp
+try
+{
+    await connection.RequestAsync<TReq, TRes>(request);
+}
+catch (IpcRemoteException ex)
+{
+    Console.WriteLine($"Remote error: {ex.Message}");
+}
+catch (TimeoutException ex)
+{
+    Console.WriteLine("Request timed out");
+}
+catch (IpcDisconnectedException ex)
+{
+    Console.WriteLine("Connection lost");
+}
+```
+
+## Disconnection Handling
+
+```csharp
+connection.Disconnected += (sender, e) => Console.WriteLine("Disconnected");
+
+// Use token for async operations
+await Task.Delay(-1, connection.DisconnectedToken);
+
+// Check status
+if (connection.IsConnected) { ... }
+```
+
+## Custom Serialization
+
+Implement `IIpcSerializer` for custom serialization:
+
+```csharp
+public class MessagePackSerializer : IIpcSerializer
+{
+    public string Serialize<T>(T value) { ... }
+    public string Serialize(object value) { ... }
+    public T? Deserialize<T>(string? data) { ... }
+    public object? Deserialize(string? data, Type type) { ... }
+}
+
+// Use custom serializer
+await IpcParentConnection.StartChildAsync("child.exe", new MessagePackSerializer());
+await IpcChildConnection.ConnectAsync(args, new MessagePackSerializer());
+```
+
+## API Reference
+
+### IpcParentConnection
+
+| Member | Description |
+|--------|-------------|
+| `StartChildAsync(path, timeout?, ct)` | Start child and connect |
+| `On<TReq, TRes>(handler)` | Register request handler |
+| `On<TMsg>(handler)` | Register message handler |
+| `RequestAsync<TReq, TRes>(req, timeout?, ct)` | Send request and await response |
+| `SendAsync<T>(msg, ct)` | Send fire-and-forget message |
+| `WaitForExitAsync(ct)` | Wait for child to exit |
+| `ChildProcessId` | Child process ID |
+| `IsConnected` | Connection status |
+| `DisconnectedToken` | Cancellation token for disconnection |
+| `Disconnected` | Disconnection event |
+
+### IpcChildConnection
+
+| Member | Description |
+|--------|-------------|
+| `ConnectAsync(args, timeout?, ct)` | Connect to parent |
+| `On<TReq, TRes>(handler)` | Register request handler |
+| `On<TMsg>(handler)` | Register message handler |
+| `RequestAsync<TReq, TRes>(req, timeout?, ct)` | Send request and await response |
+| `SendAsync<T>(msg, ct)` | Send fire-and-forget message |
+| `ParentProcessId` | Parent process ID (if available) |
+| `IsConnected` | Connection status |
+| `DisconnectedToken` | Cancellation token for disconnection |
+| `Disconnected` | Disconnection event |
 
 ## License
 

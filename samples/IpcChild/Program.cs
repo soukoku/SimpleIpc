@@ -1,54 +1,64 @@
 ﻿using SimpleIpc;
+using SharedMessages;
 
-namespace IpcChild;
-
-// Sample message types
-public record GreetingRequest(string Command, DateTime Timestamp);
-public record GreetingResponse(string Result, string ProcessedBy);
-
-internal class Program
+namespace SharedMessages
 {
-    static async Task Main(string[] args)
+    // Shared message types - must use same namespace in both projects for type matching
+    public record MathRequest(string Op, int A, int B);
+    public record MathResponse(int Result);
+    public record Ping(string Message);
+    public record Pong(string Reply);
+    public record Notification(string Text);
+}
+
+namespace IpcChild
+{
+    internal class Program
     {
-        await using var connection = await IpcChildConnection.CreateAndWaitForConnectionAsync(args);
-
-        // Subscribe to disconnection event
-        connection.Disconnected += (sender, e) =>
+        static async Task Main(string[] args)
         {
-            Console.Error.WriteLine("Parent disconnected! Shutting down...");
-        };
+            await using var connection = await IpcChildConnection.ConnectAsync(args);
 
-        Console.Error.WriteLine($"Connected to parent (PID: {connection.ParentProcessId})");
+            Console.WriteLine($"[Child] Connected to parent (PID: {connection.ParentProcessId})");
 
-        try
-        {
-            // Use DisconnectedToken to automatically cancel operations when parent exits
-            while (!connection.DisconnectedToken.IsCancellationRequested)
+            // Handle math requests from parent
+            connection.On<MathRequest, MathResponse>(req =>
             {
-                var request = await connection.ReadAsync<GreetingRequest>();
-                
-                if (request is null)
+                Console.WriteLine($"  [Child] Calculating: {req.A} {req.Op} {req.B}");
+                int result = req.Op switch
                 {
-                    // Connection closed normally
-                    break;
-                }
+                    "+" => req.A + req.B,
+                    "-" => req.A - req.B,
+                    "*" => req.A * req.B,
+                    "/" when req.B != 0 => req.A / req.B,
+                    "/" => throw new DivideByZeroException("Cannot divide by zero"),
+                    _ => throw new NotSupportedException($"Unknown: {req.Op}")
+                };
+                return new MathResponse(result);
+            });
 
-                if (request.Command == "hello")
-                {
-                    var response = new GreetingResponse(
-                        Result: "world",
-                        ProcessedBy: $"Child PID {Environment.ProcessId}"
-                    );
-                    await connection.SendAsync(response);
-                    break;
-                }
+            // Handle one-way notifications from parent
+            connection.On<Notification>(n => Console.WriteLine($"  [Child] Notification: {n.Text}"));
+
+            // Handle disconnection
+            connection.Disconnected += (_, _) => Console.WriteLine("[Child] Disconnected.");
+
+            try
+            {
+                // Child can also send requests to parent
+                await Task.Delay(200);
+                var pong = await connection.RequestAsync<Ping, Pong>(new Ping("Hello parent!"));
+                Console.WriteLine($"  [Child] Got reply: {pong.Reply}");
+
+                // Child can send notifications too
+                await connection.SendAsync(new Notification("Child ready"));
+
+                // Wait until parent disconnects
+                await Task.Delay(-1, connection.DisconnectedToken);
             }
-        }
-        catch (OperationCanceledException) when (connection.DisconnectedToken.IsCancellationRequested)
-        {
-            // Parent exited, exit gracefully
-        }
+            catch (OperationCanceledException) { }
 
-        Console.Error.WriteLine("Child exiting.");
+            Console.WriteLine("[Child] Exiting.");
+        }
     }
 }
