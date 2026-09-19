@@ -18,6 +18,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "_common", "_common", "{8DE4
 		src\Directory.Build.props = src\Directory.Build.props
 		LICENSE.txt = LICENSE.txt
 		Readme.md = Readme.md
+		Build.sh = Build.sh
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{48226402-D354-4DEE-8B8F-71C1A1A21D41}"
