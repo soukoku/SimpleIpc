@@ -109,7 +109,7 @@ public abstract class IpcConnection :
 
         _requestHandlers[typeof(TRequest)] = async (obj, ct) =>
         {
-            var response = await handler((TRequest)obj, ct);
+            var response = await handler((TRequest)obj, ct).ConfigureAwait(false);
             return response;
         };
     }
@@ -146,7 +146,7 @@ public abstract class IpcConnection :
 
         _messageHandlers[typeof(TMessage)] = async (obj, ct) =>
         {
-            await handler((TMessage)obj, ct);
+            await handler((TMessage)obj, ct).ConfigureAwait(false);
         };
     }
 
@@ -184,7 +184,7 @@ public abstract class IpcConnection :
             PayloadJson = _serializer.Serialize(message)
         };
 
-        await SendEnvelopeAsync(envelope, cancellationToken);
+        await SendEnvelopeAsync(envelope, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -226,7 +226,7 @@ public abstract class IpcConnection :
                 PayloadJson = _serializer.Serialize(request)
             };
 
-            await SendEnvelopeAsync(envelope, cancellationToken);
+            await SendEnvelopeAsync(envelope, cancellationToken).ConfigureAwait(false);
 
             using var timeoutCts = new CancellationTokenSource(actualTimeout);
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -235,7 +235,7 @@ public abstract class IpcConnection :
             IpcMessageEnvelope responseEnvelope;
             try
             {
-                responseEnvelope = await tcs.Task.WaitAsync(linkedCts.Token);
+                responseEnvelope = await tcs.Task.WaitAsync(linkedCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
             {
@@ -266,7 +266,7 @@ public abstract class IpcConnection :
         {
             while (!_disconnectCts.Token.IsCancellationRequested)
             {
-                var rawMessage = await ReadRawMessageAsync(_disconnectCts.Token);
+                var rawMessage = await ReadRawMessageAsync(_disconnectCts.Token).ConfigureAwait(false);
                 if (rawMessage == null)
                 {
                     // Pipe closed
@@ -308,11 +308,11 @@ public abstract class IpcConnection :
                 // Handle incoming requests and one-way messages
                 if (envelope.Type == MessageType.Request)
                 {
-                    _ = HandleIncomingRequestAsync(envelope);
+                    _ = HandleIncomingRequestAsync(envelope).ConfigureAwait(false);
                 }
                 else if (envelope.Type == MessageType.OneWay)
                 {
-                    _ = HandleIncomingMessageAsync(envelope);
+                    _ = HandleIncomingMessageAsync(envelope).ConfigureAwait(false);
                 }
             }
         }
@@ -332,26 +332,26 @@ public abstract class IpcConnection :
             var payloadType = FindTypeByName(envelope.PayloadType);
             if (payloadType == null || !_requestHandlers.TryGetValue(payloadType, out var handler))
             {
-                await SendErrorResponseAsync(envelope.MessageId!, $"No handler registered for request type: {envelope.PayloadType}");
+                await SendErrorResponseAsync(envelope.MessageId!, $"No handler registered for request type: {envelope.PayloadType}").ConfigureAwait(false);
                 return;
             }
 
             var payload = _serializer.Deserialize(envelope.PayloadJson, payloadType);
             if (payload == null)
             {
-                await SendErrorResponseAsync(envelope.MessageId!, "Failed to deserialize request payload.");
+                await SendErrorResponseAsync(envelope.MessageId!, "Failed to deserialize request payload.").ConfigureAwait(false);
                 return;
             }
 
-            var response = await handler(payload, _disconnectCts.Token);
+            var response = await handler(payload, _disconnectCts.Token).ConfigureAwait(false);
             if (response != null)
             {
-                await SendResponseAsync(envelope.MessageId!, response);
+                await SendResponseAsync(envelope.MessageId!, response).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
         {
-            await SendErrorResponseAsync(envelope.MessageId!, ex.Message);
+            await SendErrorResponseAsync(envelope.MessageId!, ex.Message).ConfigureAwait(false);
         }
     }
 
@@ -368,7 +368,7 @@ public abstract class IpcConnection :
             var payload = _serializer.Deserialize(envelope.PayloadJson, payloadType);
             if (payload != null)
             {
-                await handler(payload, _disconnectCts.Token);
+                await handler(payload, _disconnectCts.Token).ConfigureAwait(false);
             }
         }
         catch
@@ -405,7 +405,7 @@ public abstract class IpcConnection :
             PayloadJson = _serializer.Serialize(response)
         };
 
-        await SendEnvelopeAsync(envelope, CancellationToken.None);
+        await SendEnvelopeAsync(envelope, CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task SendErrorResponseAsync(string correlationId, string errorMessage)
@@ -418,7 +418,7 @@ public abstract class IpcConnection :
             PayloadJson = _serializer.Serialize(new IpcErrorResponse { Message = errorMessage })
         };
 
-        await SendEnvelopeAsync(envelope, CancellationToken.None);
+        await SendEnvelopeAsync(envelope, CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task SendEnvelopeAsync(IpcMessageEnvelope envelope, CancellationToken cancellationToken)
@@ -428,14 +428,14 @@ public abstract class IpcConnection :
 
         try
         {
-            await _writeLock.WaitAsync(cancellationToken);
+            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disconnectCts.Token);
 #if NET462
-                await Task.Run(() => _writer.WriteLine(json), linkedCts.Token);
+                await Task.Run(() => _writer.WriteLine(json), linkedCts.Token).ConfigureAwait(false);
 #else
-                await _writer.WriteLineAsync(json.AsMemory(), linkedCts.Token);
+                await _writer.WriteLineAsync(json.AsMemory(), linkedCts.Token).ConfigureAwait(false);
 #endif
             }
             finally
@@ -459,9 +459,9 @@ public abstract class IpcConnection :
         try
         {
 #if NET462
-            return await Task.Run(() => _reader.ReadLine(), cancellationToken);
+            return await Task.Run(() => _reader.ReadLine(), cancellationToken).ConfigureAwait(false);
 #else
-            return await _reader.ReadLineAsync(cancellationToken);
+            return await _reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
 #endif
         }
         catch (IOException)
@@ -543,7 +543,7 @@ public abstract class IpcConnection :
         {
             try
             {
-                await _messageLoop.WaitAsync(TimeSpan.FromSeconds(1));
+                await _messageLoop.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
             }
             catch
             {
@@ -553,9 +553,9 @@ public abstract class IpcConnection :
 
         _disconnectCts.Dispose();
         _writeLock.Dispose();
-        await _writer.DisposeAsync();
+        await _writer.DisposeAsync().ConfigureAwait(false);
         _reader.Dispose();
-        await _pipe.DisposeAsync();
+        await _pipe.DisposeAsync().ConfigureAwait(false);
 
         lock (_pendingRequests)
         {

@@ -79,8 +79,8 @@ namespace IpcParent
             var currentDir = AppContext.BaseDirectory;
             var possiblePaths = new[]
             {
-                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net9.0", "IpcChild.exe"),
-                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net9.0", "IpcChild.exe"),
+                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net10.0", "IpcChild.exe"),
+                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net10.0", "IpcChild.exe"),
                 Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net8.0", "IpcChild.exe"),
                 Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net8.0", "IpcChild.exe"),
             };

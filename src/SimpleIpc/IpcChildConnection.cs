@@ -123,9 +123,9 @@ public sealed class IpcChildConnection : IpcConnection
             try
             {
 #if NET462
-                await Task.Run(() => pipeServer.WaitForConnection(), linkedCts.Token);
+                await Task.Run(() => pipeServer.WaitForConnection(), linkedCts.Token).ConfigureAwait(false);
 #else
-                await pipeServer.WaitForConnectionAsync(linkedCts.Token);
+                await pipeServer.WaitForConnectionAsync(linkedCts.Token).ConfigureAwait(false);
 #endif
             }
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
@@ -140,7 +140,7 @@ public sealed class IpcChildConnection : IpcConnection
 #if NET462
             pipeServer.Dispose();
 #else
-            await pipeServer.DisposeAsync();
+            await pipeServer.DisposeAsync().ConfigureAwait(false);
 #endif
             throw;
         }
@@ -208,7 +208,7 @@ public sealed class IpcChildConnection : IpcConnection
             _parentProcess.Dispose();
         }
 
-        await base.DisposeCoreAsync();
+        await base.DisposeCoreAsync().ConfigureAwait(false);
     }
 #endif
 }

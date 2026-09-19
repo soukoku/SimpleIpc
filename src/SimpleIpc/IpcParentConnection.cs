@@ -122,26 +122,26 @@ public sealed class IpcParentConnection : IpcConnection
                     FileName = childExecutablePath,
                     Arguments = $"{IpcChildConnection.PipeNameArg} {pipeName} {ParentPidArg} {parentPid}",
                     UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
+                    //RedirectStandardOutput = true,
+                    //RedirectStandardError = true,
                     CreateNoWindow = true
                 }
             };
 
-            childProcess.OutputDataReceived += (sender, e) =>
-            {
-                if (e.Data != null)
-                    Console.WriteLine(e.Data);
-            };
-            childProcess.ErrorDataReceived += (sender, e) =>
-            {
-                if (e.Data != null)
-                    Console.Error.WriteLine(e.Data);
-            };
+            //childProcess.OutputDataReceived += (sender, e) =>
+            //{
+            //    if (e.Data != null)
+            //        Debug.WriteLine(e.Data);
+            //};
+            //childProcess.ErrorDataReceived += (sender, e) =>
+            //{
+            //    if (e.Data != null)
+            //        Debug.WriteLine(e.Data);
+            //};
 
             childProcess.Start();
-            childProcess.BeginOutputReadLine();
-            childProcess.BeginErrorReadLine();
+            //childProcess.BeginOutputReadLine();
+            //childProcess.BeginErrorReadLine();
 
             pipeClient = new NamedPipeClientStream(
                 ".",
@@ -153,10 +153,10 @@ public sealed class IpcParentConnection : IpcConnection
             using (var timeoutCts = new CancellationTokenSource(timeout))
             using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token))
             {
-                await Task.Run(() => pipeClient.Connect((int)timeout.TotalMilliseconds), linkedCts.Token);
+                await Task.Run(() => pipeClient.Connect((int)timeout.TotalMilliseconds), linkedCts.Token).ConfigureAwait(false);
             }
 #else
-            await pipeClient.ConnectAsync((int)timeout.TotalMilliseconds, cancellationToken);
+            await pipeClient.ConnectAsync((int)timeout.TotalMilliseconds, cancellationToken).ConfigureAwait(false);
 #endif
 
             return new IpcParentConnection(childProcess, pipeClient, serializer);
@@ -168,7 +168,7 @@ public sealed class IpcParentConnection : IpcConnection
 #else
             if (pipeClient != null)
             {
-                await pipeClient.DisposeAsync();
+                await pipeClient.DisposeAsync().ConfigureAwait(false);
             }
 #endif
 
@@ -193,9 +193,9 @@ public sealed class IpcParentConnection : IpcConnection
     {
         ThrowIfDisposed();
 #if NET462
-        await Task.Run(() => _childProcess.WaitForExit(), cancellationToken);
+        await Task.Run(() => _childProcess.WaitForExit(), cancellationToken).ConfigureAwait(false);
 #else
-        await _childProcess.WaitForExitAsync(cancellationToken);
+        await _childProcess.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
 #endif
     }
 
@@ -225,7 +225,7 @@ public sealed class IpcParentConnection : IpcConnection
 
         _childProcess.Exited -= OnChildExited;
 
-        await base.DisposeCoreAsync();
+        await base.DisposeCoreAsync().ConfigureAwait(false);
 
         if (!_childProcess.HasExited)
         {
