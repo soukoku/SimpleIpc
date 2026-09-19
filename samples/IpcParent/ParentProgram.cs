@@ -81,8 +81,8 @@ namespace IpcParent
             {
                 Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net10.0", "IpcChild.exe"),
                 Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net10.0", "IpcChild.exe"),
-                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net8.0", "IpcChild.exe"),
-                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net8.0", "IpcChild.exe"),
+                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Debug", "net10.0", "IpcChild"),
+                Path.Combine(currentDir, "..", "..", "..", "..", "IpcChild", "bin", "Release", "net10.0", "IpcChild"),
             };
 
             foreach (var path in possiblePaths)

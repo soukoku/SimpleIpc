@@ -22,11 +22,11 @@ public abstract class IpcConnection :
     IAsyncDisposable, IDisposable
 #endif
 {
-    private readonly PipeStream _pipe;
-    private readonly StreamReader _reader;
-    private readonly StreamWriter _writer;
+    private PipeStream _pipe;
+    private StreamReader _reader;
+    private StreamWriter _writer;
     private readonly IIpcSerializer _serializer;
-    private readonly CancellationTokenSource _disconnectCts = new();
+    private CancellationTokenSource _disconnectCts = new();
     private readonly Dictionary<string, TaskCompletionSource<IpcMessageEnvelope>> _pendingRequests = new();
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly Dictionary<Type, Func<object, CancellationToken, Task<object?>>> _requestHandlers = new();
@@ -93,6 +93,102 @@ public abstract class IpcConnection :
             }
         }
     }
+
+    /// <summary>
+    /// Replaces the underlying transport with a newly connected pipe and restarts the message loop.
+    /// Used by connections that support automatic reconnection (e.g. after restarting a crashed child
+    /// process). Registered message/request handlers and event subscriptions are preserved across the
+    /// call since the same <see cref="IpcConnection"/> instance keeps running.
+    /// </summary>
+    /// <param name="newPipe">A new, already-connected pipe to use going forward.</param>
+    protected void Rebind(PipeStream newPipe)
+    {
+        if (newPipe is null) throw new ArgumentNullException(nameof(newPipe));
+        ThrowIfDisposed();
+
+        StopMessageLoop();
+
+        _disconnectCts = new CancellationTokenSource();
+        _pipe = newPipe;
+        _reader = new StreamReader(_pipe);
+        _writer = new StreamWriter(_pipe) { AutoFlush = true };
+
+        StartMessageLoop();
+    }
+
+    /// <summary>
+    /// Cancels and tears down the currently running message loop and its transport, leaving the
+    /// connection ready to either be rebound to a new pipe or fully disposed.
+    /// </summary>
+    private void StopMessageLoop()
+    {
+        if (!_disconnectCts.IsCancellationRequested)
+        {
+            _disconnectCts.Cancel();
+        }
+
+        try
+        {
+            _messageLoop?.Wait(TimeSpan.FromSeconds(1));
+        }
+        catch
+        {
+            // Ignore - loop may have been cancelled
+        }
+
+        _disconnectCts.Dispose();
+        _writer.Dispose();
+        _reader.Dispose();
+        _pipe.Dispose();
+
+        lock (_pendingRequests)
+        {
+            foreach (var tcs in _pendingRequests.Values)
+            {
+                tcs.TrySetCanceled();
+            }
+            _pendingRequests.Clear();
+        }
+    }
+
+#if !NET462
+    /// <summary>
+    /// Async equivalent of <see cref="StopMessageLoop"/>, used when disposing asynchronously.
+    /// </summary>
+    private async Task StopMessageLoopAsync()
+    {
+        if (!_disconnectCts.IsCancellationRequested)
+        {
+            _disconnectCts.Cancel();
+        }
+
+        if (_messageLoop != null)
+        {
+            try
+            {
+                await _messageLoop.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Ignore - loop may have been cancelled
+            }
+        }
+
+        _disconnectCts.Dispose();
+        await _writer.DisposeAsync().ConfigureAwait(false);
+        _reader.Dispose();
+        await _pipe.DisposeAsync().ConfigureAwait(false);
+
+        lock (_pendingRequests)
+        {
+            foreach (var tcs in _pendingRequests.Values)
+            {
+                tcs.TrySetCanceled();
+            }
+            _pendingRequests.Clear();
+        }
+    }
+#endif
 
     /// <summary>
     /// Registers a handler for request messages of type <typeparamref name="TRequest"/>
@@ -497,33 +593,8 @@ public abstract class IpcConnection :
         if (_disposed) return;
         _disposed = true;
 
-        // Cancel first to stop message loop and pending operations
-        _disconnectCts.Cancel();
-
-        // Wait for message loop to complete (with timeout to avoid deadlock)
-        try
-        {
-            _messageLoop?.Wait(TimeSpan.FromSeconds(1));
-        }
-        catch
-        {
-            // Ignore - loop may have been cancelled
-        }
-
-        _disconnectCts.Dispose();
+        StopMessageLoop();
         _writeLock.Dispose();
-        _writer.Dispose();
-        _reader.Dispose();
-        _pipe.Dispose();
-
-        lock (_pendingRequests)
-        {
-            foreach (var tcs in _pendingRequests.Values)
-            {
-                tcs.TrySetCanceled();
-            }
-            _pendingRequests.Clear();
-        }
     }
 
 #if !NET462
@@ -535,36 +606,8 @@ public abstract class IpcConnection :
         if (_disposed) return;
         _disposed = true;
 
-        // Cancel first to stop message loop and pending operations
-        _disconnectCts.Cancel();
-
-        // Wait for message loop to complete
-        if (_messageLoop != null)
-        {
-            try
-            {
-                await _messageLoop.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Ignore - loop may have been cancelled
-            }
-        }
-
-        _disconnectCts.Dispose();
+        await StopMessageLoopAsync().ConfigureAwait(false);
         _writeLock.Dispose();
-        await _writer.DisposeAsync().ConfigureAwait(false);
-        _reader.Dispose();
-        await _pipe.DisposeAsync().ConfigureAwait(false);
-
-        lock (_pendingRequests)
-        {
-            foreach (var tcs in _pendingRequests.Values)
-            {
-                tcs.TrySetCanceled();
-            }
-            _pendingRequests.Clear();
-        }
     }
 #endif
 

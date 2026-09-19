@@ -140,6 +140,34 @@ await Task.Delay(-1, connection.DisconnectedToken);
 if (connection.IsConnected) { ... }
 ```
 
+## Auto-Restart of the Child Process
+
+By default, `IpcParentConnection` automatically restarts the child process and re-establishes the
+pipe connection if the child exits unexpectedly. Registered handlers and event subscriptions stay in
+effect across restarts since the same `IpcParentConnection` instance keeps running - only
+`ChildProcessId` and `DisconnectedToken` change.
+
+```csharp
+var options = new IpcParentConnectionOptions
+{
+    ChildExecutablePath = "child.exe",
+    AutoRestartChild = true,           // default: true
+    RestartDelay = TimeSpan.FromSeconds(1),
+    MaxRestartAttempts = null,         // null = retry forever
+};
+
+await using var connection = await IpcParentConnection.StartChildAsync(options);
+
+connection.ChildRestarted += (sender, e) =>
+    Console.WriteLine($"Child restarted (pid: {e.ChildProcessId}, attempts: {e.Attempts})");
+
+connection.ChildRestartFailed += (sender, e) =>
+    Console.WriteLine($"Gave up restarting child after {e.Attempts} attempts");
+```
+
+Restarting only stops once the connection is disposed, or after `MaxRestartAttempts` consecutive
+failures if configured. Set `AutoRestartChild = false` to restore the previous one-shot behavior.
+
 ## Custom Serialization
 
 Implement `IIpcSerializer` for custom serialization:
@@ -164,16 +192,19 @@ await IpcChildConnection.ConnectAsync(args, new MessagePackSerializer());
 
 | Member | Description |
 |--------|-------------|
-| `StartChildAsync(path, timeout?, ct)` | Start child and connect |
+| `StartChildAsync(path, timeout?, ct)` | Start child and connect (auto-restart enabled) |
+| `StartChildAsync(options, ct)` | Start child and connect using `IpcParentConnectionOptions` |
 | `On<TReq, TRes>(handler)` | Register request handler |
 | `On<TMsg>(handler)` | Register message handler |
 | `RequestAsync<TReq, TRes>(req, timeout?, ct)` | Send request and await response |
 | `SendAsync<T>(msg, ct)` | Send fire-and-forget message |
-| `WaitForExitAsync(ct)` | Wait for child to exit |
-| `ChildProcessId` | Child process ID |
+| `WaitForExitAsync(ct)` | Wait for the current child process to exit |
+| `ChildProcessId` | Current child process ID (changes on restart) |
 | `IsConnected` | Connection status |
-| `DisconnectedToken` | Cancellation token for disconnection |
-| `Disconnected` | Disconnection event |
+| `DisconnectedToken` | Cancellation token for the current connection cycle |
+| `Disconnected` | Fired whenever the pipe/child connection drops |
+| `ChildRestarted` | Fired after the child is automatically restarted and reconnected |
+| `ChildRestartFailed` | Fired when `MaxRestartAttempts` is exceeded and restarting gives up |
 
 ### IpcChildConnection
 
